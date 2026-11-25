@@ -1,0 +1,22 @@
+#!/bin/bash
+set -e
+
+package_dir="$1"
+echo "Applying rootless patches to $package_dir"
+
+# Find all Mach-O binaries and sign them
+find "$package_dir" -type f -print0 2>/dev/null | while IFS= read -r -d '' file; do
+    if file "$file" 2>/dev/null | grep -qE "Mach-O (executable|shared library)"; then
+        echo "Signing $file"
+        ldid -S "$file" 2>/dev/null || true
+    fi
+done
+
+# Patch common paths in plists
+find "$package_dir" -type f -name "*.plist" -print0 2>/dev/null | while IFS= read -r -d '' file; do
+    sed -i 's|/Applications/|/var/jb/Applications/|g' "$file" 2>/dev/null || true
+    sed -i 's|/Library/|/var/jb/Library/|g' "$file" 2>/dev/null || true
+    sed -i 's|/usr/|/var/jb/usr/|g' "$file" 2>/dev/null || true
+done
+
+echo "Rootless patches applied"
