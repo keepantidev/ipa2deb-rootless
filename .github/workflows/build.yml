@@ -1,0 +1,66 @@
+name: Build .deb from IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: 'URL to IPA file to convert'
+        required: true
+        type: string
+      maintainer:
+        description: 'Maintainer name and email'
+        required: true
+        type: string
+        default: 'Builder <builder@example.com>'
+      website:
+        description: 'Website URL'
+        required: true
+        type: string
+        default: 'https://example.com'
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get IPA
+        run: |
+          if [ "${{ inputs.ipa_url }}" != "" ]; then
+            wget -O app.ipa "${{ inputs.ipa_url }}"
+          else
+            echo "No IPA URL provided, searching for .ipa in release assets"
+            gh release download ${{ github.event.release.tag_name }} --pattern "*.ipa" --dir . || true
+            if [ ! -f *.ipa ]; then
+              echo "No IPA found in release assets"
+              exit 1
+            fi
+            mv *.ipa app.ipa
+          fi
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip dpkg-dev
+
+      - name: Build .deb
+        run: |
+          chmod +x ipa2deb-1.0/ipa2deb
+          mkdir -p output
+          ipa2deb-1.0/ipa2deb app.ipa output "${{ inputs.maintainer }}" "${{ inputs.website }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: output/*.deb
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} output/*.deb
+        env:
+          GH_TOKEN: ${{ github.token }}
