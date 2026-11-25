@@ -38,6 +38,12 @@ plist_value()
             return 1
         fi
         printf '%s' "$output"
+    elif command -v python3 &> /dev/null; then
+        output=$(python3 -c "import plistlib, sys; p=plistlib.load(open('$1','rb')); print(p.get('$2','')))" 2>/dev/null) || return 1
+        if [[ -z "$output" || "$output" == "None" ]]; then
+            return 1
+        fi
+        printf '%s' "$output"
     else
         return 1
     fi
@@ -167,7 +173,7 @@ if [ "$#" -ne 4 ]; then
     exit 1
 fi
 
-for command_name in unzip dpkg-deb find sort sed tr plutil; do
+for command_name in unzip dpkg-deb find sort sed tr; do
     if ! command -v "$command_name" &> /dev/null; then
         echo "Error: $command_name can not be found, please install it."
         exit 1
