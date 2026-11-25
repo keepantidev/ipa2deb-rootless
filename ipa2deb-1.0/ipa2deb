@@ -160,13 +160,6 @@ EOF
     cp "$package_dir/DEBIAN/postinst" "$package_dir/DEBIAN/postrm"
     chmod 0755 "$package_dir/DEBIAN/postinst" "$package_dir/DEBIAN/postrm"
 
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [[ -f "$script_dir/rootless-patch" ]]; then
-        chmod +x "$script_dir/rootless-patch"
-        "$script_dir/rootless-patch" "$package_dir" || true
-    fi
-
     if ! dpkg-deb -Zgzip -b "$package_dir" &> /dev/null; then
         log_conversion_failure "$output_dir" "Error: dpkg-deb failed to build a .deb file for the ipa file: $ipa_file"
         return
