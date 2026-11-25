@@ -1,53 +1,40 @@
-# [alex-free.github.io](https://alex-free.github.io)
+# IPA2DEB Rootless
 
-## IPA2DEB
+Convert iOS .ipa files to .deb packages for rootless jailbreaks (palera1n, Dopamine, etc).
 
-By Alex Free
+## Changes from original
 
-The [.ipa](https://www.theiphonewiki.com/wiki/IPA_File_Format) file format is the official way iOS applications are distributed by Apple. For older devices that can no longer use the AppStore or other means, these files can be installed manually after they are 'decrypted' (untied from the specific AppleID used to purchase/download them) using various methods.
+- **Removed Python dependency** - uses PlistBuddy or Python3 fallback for plist parsing
+- **Removed sudo requirements** - works without root privileges
+- **Rootless layout** - `Architecture: iphoneos-arm64`, installs to `/var/jb/Applications`
+- **Temp files in `$TMPDIR`** instead of `/var/tmp`
 
-I think there is a better way to manage applications originally distributed in the `.ipa` file format. That is, to convert decrypted `.ipa` files to the format that jailbreak-only software/tweaks are distributed in traditionally, known as `.deb`.
+## Important: Store Apps on Rootless
 
-## External Links
+Store applications (App Store apps like Geometry Dash) require code signing and path patching to work on rootless jailbreaks. This converter only changes the format from IPA to DEB with rootless layout.
 
-*   [Homepage](https://alex-free.github.io/ipa2deb) 
-*   [GitHub](https://github.com/alex-free/ipa2deb)
+**For Store apps to work, after installation use:**
+- [Xinamine Rootless Patcher](https://onejailbreak.com/blog/xinamine-rootless-patcher-script/)
+- Or install AppSync Unified + run `uicache`
 
-## Table Of Contents
-
-*   [Downloads](#downloads)
-*   [Usage](#usage)
-*   [License](#license)
-
-## Downloads
-
-### v1.0 (2/27/2023)
-
-[IPA2DEB v1.0](https://github.com/alex-free/ipa2deb/releases/download/v1.0/ipa2deb-1.0.zip)
-
+The jailbreak bootstrap (Procursus/Dopamine) handles signing automatically for most tweaks, but not for Store apps without patching.
 
 ## Usage
 
-IPA2DEB requires 4 arguments:
+### Local conversion
 
-1) The filepath of the `.ipa` file you want to convert, **or** a directory of `.ipa` files (that IPA2DEB will bulk convert recursively).
+```bash
+./ipa2deb-1.0/ipa2deb <ipa file or directory> <output dir> "Name <email>" "https://website.com"
+```
 
-2) The filepath of the the output directory, where your converted `.deb` files will be written to as well as any error `.txt` log files.
+### GitHub Actions
 
-3) Your contact info: first name, last name, email (all in quotes). Something like `"Your Name <Your_Name@youremail.com>"`.  You don't have to really put an email here though if you'd rather not.
-
-4) Your website URL (used for `.deb` related info).
-
-There are 3 possible log files that may be generated during conversion by IPA2DEB:
-
-*   `ipa2deb-extraction-failure-log.txt` will be generated if a `.ipa` file can not be extracted to be further processed.
-*   `ipa2deb-conversion-failure-log.txt` will be generated if `dpkg-deb` fails to build a `.deb` file out of the original `.ipa` file due to missing required information.
-*   `ipa2deb-duplicate-packages-log.txt` will be generated if any files are created more then once. The resulting duplicate deb files will be placed in a `duplicates` directory, which will be removed on the next run of IPA2DEB if the output directory (2nd argument) remains the same.
-
-These log files will be mentioned at the end of a conversion if they are generated. All files mentioned above are placed in the same output directory as the converted `.deb` files, specified by the 2nd argument given to IPA2DEB.
-
-There is an additional script available in each IPA2DEB release, `genrepo`. This script requires 1 argument, a directory of `.deb` file(s). It will generate a `Packages.gz` and turn the directory into a valid Cydia repo that can be uploaded on a server to use.
+1. Upload IPA to the [latest release](https://github.com/keepantidev/ipa2deb-rootless/releases)
+2. Go to **Actions** → **Build .deb from IPA**
+3. Click **Run workflow**
+4. Enter IPA URL from release, maintainer info, website
+5. Download .deb from Artifacts
 
 ## License
 
-IPA2DEB is released into the public domain, see the file `unlicense.txt` for more info.
+Public domain (Unlicense).
