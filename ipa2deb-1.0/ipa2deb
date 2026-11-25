@@ -32,15 +32,15 @@ plist_value()
             *"Does Not Exist"*) return 1 ;;
         esac
         printf '%s' "$output"
-    elif command -v plutil &> /dev/null; then
-        output=$(plutil -p "$1" 2>/dev/null | grep "$2" | cut -d'"' -f4) || return 1
-        if [[ -z "$output" ]]; then
+    elif command -v python3 &> /dev/null; then
+        output=$(python3 -c "import plistlib, sys; p=plistlib.load(open('$1','rb')); v=p.get('$2'); print(v if v is not None else '')" 2>/dev/null) || return 1
+        if [[ -z "$output" || "$output" == "None" ]]; then
             return 1
         fi
         printf '%s' "$output"
-    elif command -v python3 &> /dev/null; then
-        output=$(python3 -c "import plistlib, sys; p=plistlib.load(open('$1','rb')); print(p.get('$2','')))" 2>/dev/null) || return 1
-        if [[ -z "$output" || "$output" == "None" ]]; then
+    elif command -v plutil &> /dev/null; then
+        output=$(plutil -p "$1" 2>/dev/null | sed -n "s/.*$2 => \"\\([^\"]*\\)\".*/\\1/p" | head -1) || return 1
+        if [[ -z "$output" ]]; then
             return 1
         fi
         printf '%s' "$output"
