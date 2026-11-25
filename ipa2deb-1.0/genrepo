@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+echo "GenRepo v1.1 rootless for IPA2DEB By Alex Free"
+
+if [ "$#" -ne 1 ]; then
+    echo "Error: 1 argument is required for genrepo"
+    exit 1
+fi
+
+if ! command -v dpkg-scanpackages &> /dev/null; then
+    echo "Error: dpkg-scanpackages can not be found, please install dpkg without using sudo if possible."
+    exit 1
+fi
+
+cd "$1"
+dpkg-scanpackages -m . /dev/null > Packages
+gzip -f Packages

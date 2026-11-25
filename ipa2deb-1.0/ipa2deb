@@ -1,0 +1,233 @@
+#!/bin/bash
+
+if [ "${BASH_VERSINFO}" -lt 4 ]; then
+    echo "Error: This Bash version is too old to run ipa2deb. Please install and or upgrade to a newer version of Bash."
+    exit 1
+fi
+
+echo -e "IPA2DEB v1.1 rootless by Alex Free\n"
+
+cleanup()
+{
+    if [[ -n "${tmp:-}" && -e "$tmp" ]]; then
+        rm -rf "$tmp"
+    fi
+}
+trap cleanup EXIT
+
+clean_field()
+{
+    local value="$1"
+    value="${value//$'\r'/ }"
+    value="${value//$'\n'/ }"
+    printf '%s' "$value"
+}
+
+plist_value()
+{
+    local output
+    output=$("$PLISTBUDDY" -c "Print :$2" "$1" 2>/dev/null) || return 1
+    case "$output" in
+        *"Does Not Exist"*) return 1 ;;
+    esac
+    printf '%s' "$output"
+}
+
+log_conversion_failure()
+{
+    printf '%s\n' "$2" >> "$1/ipa2deb-conversion-failure-log.txt"
+}
+
+convert()
+{
+    local ipa_file="$1"
+    local output_dir="$2"
+    local maintainer="$3"
+    local website="$4"
+    local work="$tmp/work"
+    local extracted="$work/extracted"
+    local plist_path app_path app_dirname app_id app_ver app_name app_min_os_ver_required
+    local package_name package_stem package_dir
+
+    rm -rf "$work"
+    mkdir -p "$extracted"
+
+    if ! unzip -q "$ipa_file" -d "$extracted" &> /dev/null; then
+        printf 'Not converting specified ipa file: %s as it could not be extracted, it may be corrupted\n' "$ipa_file" >> "$output_dir/ipa2deb-extraction-failure-log.txt"
+        return
+    fi
+
+    chmod -R a+rX "$extracted"
+
+    mapfile -t payload_apps < <(find "$extracted/Payload" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)
+    if [[ ! -d "$extracted/Payload" || ${#payload_apps[@]} -ne 1 ]]; then
+        log_conversion_failure "$output_dir" "Error: The ipa file: $ipa_file does not contain exactly one application in Payload/ and can not be converted"
+        return
+    fi
+
+    app_path="${payload_apps[0]}"
+    app_dirname="${app_path##*/}"
+    plist_path="$app_path/Info.plist"
+
+    if [[ ! -f "$plist_path" ]]; then
+        log_conversion_failure "$output_dir" "Error: The ipa file: $ipa_file is missing Info.plist and can not be converted"
+        return
+    fi
+
+    app_id=$(plist_value "$plist_path" CFBundleIdentifier || true)
+    app_ver=$(plist_value "$plist_path" CFBundleVersion || true)
+    app_name=$(plist_value "$plist_path" CFBundleDisplayName || true)
+    app_min_os_ver_required=$(plist_value "$plist_path" MinimumOSVersion || true)
+
+    if [[ -z "$app_name" ]]; then
+        app_name=$(plist_value "$plist_path" CFBundleName || true)
+    fi
+
+    if [[ -z "$app_id" || -z "$app_ver" || -z "$app_name" || -z "$app_min_os_ver_required" ]]; then
+        log_conversion_failure "$output_dir" "Error: The ipa file: $ipa_file is missing required Info.plist keys and can not be converted"
+        return
+    fi
+
+    app_id="$(clean_field "$app_id")"
+    app_ver="$(clean_field "$app_ver")"
+    app_name="$(clean_field "$app_name")"
+    app_min_os_ver_required="$(clean_field "$app_min_os_ver_required")"
+    maintainer="$(clean_field "$maintainer")"
+    website="$(clean_field "$website")"
+
+    package_name=$(printf '%s' "$app_id" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9+.-' '-' | sed 's/^-*//; s/-*$//')
+    if [[ -z "$package_name" ]]; then
+        log_conversion_failure "$output_dir" "Error: The ipa file: $ipa_file has an invalid CFBundleIdentifier and can not be converted"
+        return
+    fi
+    if [[ ! "$package_name" =~ ^[a-z0-9] ]]; then
+        package_name="1$package_name"
+    fi
+
+    package_stem="$package_name-$app_ver-iOS-$app_min_os_ver_required"
+    package_dir="$tmp/$package_stem"
+
+    rm -rf "$package_dir"
+    mkdir -p "$package_dir/var/jb/Applications" "$package_dir/DEBIAN"
+    mv "$app_path" "$package_dir/var/jb/Applications/$app_dirname"
+
+    cat > "$package_dir/DEBIAN/control" <<EOF
+Package: $package_name
+Name: $app_name v$app_ver (iOS $app_min_os_ver_required)
+Depends: firmware (>= $app_min_os_ver_required), uikittools, appsync
+Version: $app_ver
+Architecture: iphoneos-arm64
+Description: The decrypted ipa file: $ipa_file converted to .deb automatically by ipa2deb rootless.
+Homepage: $website
+Depiction: $website
+Maintainer: $maintainer
+Author: $maintainer
+Sponsor: $maintainer
+Section: AppStore Apps
+EOF
+
+    cat > "$package_dir/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+if command -v su >/dev/null 2>&1; then
+    su - mobile -c uicache && exit 0
+fi
+for uicache in /var/jb/usr/bin/uicache /usr/bin/uicache /usr/libexec/uicache; do
+    if [ -x "$uicache" ] && "$uicache"; then
+        exit 0
+    fi
+done
+if command -v uicache >/dev/null 2>&1 && uicache; then
+    exit 0
+fi
+exit 0
+EOF
+    cp "$package_dir/DEBIAN/postinst" "$package_dir/DEBIAN/postrm"
+    chmod 0755 "$package_dir/DEBIAN/postinst" "$package_dir/DEBIAN/postrm"
+
+    if ! dpkg-deb -Zgzip -b "$package_dir" &> /dev/null; then
+        log_conversion_failure "$output_dir" "Error: dpkg-deb failed to build a .deb file for the ipa file: $ipa_file"
+        return
+    fi
+
+    cp --backup=t "$package_dir.deb" "$output_dir/"
+}
+
+if [ "$#" -ne 4 ]; then
+    echo -e "Error: ipa2deb requires 4 arguments\nUsage:\nipa2deb <ipa file or a directory of ipa files> <output directory> <name and email> <website>\nExample:\nipa2deb example.ipa output \"your name <youremail@youremailprovider>\" \"http://yourwebsite.com\""
+    exit 1
+fi
+
+for command_name in unzip dpkg-deb find sort sed tr; do
+    if ! command -v "$command_name" &> /dev/null; then
+        echo "Error: $command_name can not be found, please install it without using sudo if possible."
+        exit 1
+    fi
+done
+
+PLISTBUDDY=""
+for candidate in /var/jb/usr/libexec/PlistBuddy /usr/libexec/PlistBuddy; do
+    if [ -x "$candidate" ]; then
+        PLISTBUDDY="$candidate"
+        break
+    fi
+done
+if [[ -z "$PLISTBUDDY" ]]; then
+    PLISTBUDDY=$(command -v PlistBuddy || true)
+fi
+if [[ -z "$PLISTBUDDY" ]]; then
+    echo "Error: PlistBuddy can not be found, please install the iOS SDK tools package."
+    exit 1
+fi
+
+mkdir -p "$2"
+output_dir=$(cd "$2" && pwd)
+rm -f "$output_dir/ipa2deb-extraction-failure-log.txt"
+rm -f "$output_dir/ipa2deb-duplicate-packages-log.txt"
+rm -f "$output_dir/ipa2deb-conversion-failure-log.txt"
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/ipa2deb.XXXXXX") || exit 1
+
+declare -a ipa_files=()
+if [[ -d "$1" ]]; then
+    mapfile -t ipa_files < <(find "$1" -type f -iname '*.ipa' -print | sort)
+    if [[ ${#ipa_files[@]} -eq 0 ]]; then
+        echo "Error: There are no .ipa files in $1"
+        exit 1
+    fi
+elif [[ -f "$1" ]]; then
+    ipa_files=("$1")
+else
+    echo "Error, $1 is not a file or directory that exists"
+    exit 1
+fi
+
+total_ipas=${#ipa_files[@]}
+for ((current_ipa = 1; current_ipa <= total_ipas; current_ipa++)); do
+    echo "Processing ipa file: $current_ipa/$total_ipas"
+    convert "${ipa_files[$((current_ipa - 1))]}" "$output_dir" "$3" "$4"
+done
+
+mapfile -t duplicate_packages < <(find "$output_dir" -maxdepth 1 -type f -name '*.deb.~*~' -print | sort)
+count_possible_duplicates=${#duplicate_packages[@]}
+if [[ $count_possible_duplicates -ne 0 ]]; then
+    duplicate_dir="$output_dir/duplicate-packages"
+    rm -rf "$duplicate_dir"
+    mkdir "$duplicate_dir"
+    duplicate_log="$output_dir/ipa2deb-duplicate-packages-log.txt"
+    : > "$duplicate_log"
+    for duplicate in "${duplicate_packages[@]}"; do
+        mv "$duplicate" "$duplicate_dir/"
+        printf '%s -> %s/%s\n' "$duplicate" "$duplicate_dir" "${duplicate##*/}" >> "$duplicate_log"
+    done
+    echo "Notice: $count_possible_duplicates duplicate packages were generated. They are in $duplicate_dir"
+fi
+
+if [[ -f "$output_dir/ipa2deb-extraction-failure-log.txt" ]]; then
+    corrupted_packages_count=$(wc -l < "$output_dir/ipa2deb-extraction-failure-log.txt" | tr -d ' ')
+    echo "Notice: $corrupted_packages_count ipa files were not extracted successfully. See $output_dir/ipa2deb-extraction-failure-log.txt"
+fi
+
+if [[ -f "$output_dir/ipa2deb-conversion-failure-log.txt" ]]; then
+    failed_conversion_packages_count=$(wc -l < "$output_dir/ipa2deb-conversion-failure-log.txt" | tr -d ' ')
+    echo "Notice: $failed_conversion_packages_count ipa files were not converted successfully. See $output_dir/ipa2deb-conversion-failure-log.txt"
+fi
