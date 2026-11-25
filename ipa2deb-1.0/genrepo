@@ -10,7 +10,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 if ! command -v dpkg-scanpackages &> /dev/null; then
-    echo "Error: dpkg-scanpackages can not be found, please install dpkg without using sudo if possible."
+    echo "Error: dpkg-scanpackages can not be found, please install dpkg."
     exit 1
 fi
 

@@ -26,11 +26,21 @@ clean_field()
 plist_value()
 {
     local output
-    output=$("$PLISTBUDDY" -c "Print :$2" "$1" 2>/dev/null) || return 1
-    case "$output" in
-        *"Does Not Exist"*) return 1 ;;
-    esac
-    printf '%s' "$output"
+    if [[ -n "$PLISTBUDDY" ]]; then
+        output=$("$PLISTBUDDY" -c "Print :$2" "$1" 2>/dev/null) || return 1
+        case "$output" in
+            *"Does Not Exist"*) return 1 ;;
+        esac
+        printf '%s' "$output"
+    elif command -v plutil &> /dev/null; then
+        output=$(plutil -p "$1" 2>/dev/null | grep "$2" | cut -d'"' -f4) || return 1
+        if [[ -z "$output" ]]; then
+            return 1
+        fi
+        printf '%s' "$output"
+    else
+        return 1
+    fi
 }
 
 log_conversion_failure()
@@ -157,9 +167,9 @@ if [ "$#" -ne 4 ]; then
     exit 1
 fi
 
-for command_name in unzip dpkg-deb find sort sed tr; do
+for command_name in unzip dpkg-deb find sort sed tr plutil; do
     if ! command -v "$command_name" &> /dev/null; then
-        echo "Error: $command_name can not be found, please install it without using sudo if possible."
+        echo "Error: $command_name can not be found, please install it."
         exit 1
     fi
 done
@@ -173,10 +183,6 @@ for candidate in /var/jb/usr/libexec/PlistBuddy /usr/libexec/PlistBuddy; do
 done
 if [[ -z "$PLISTBUDDY" ]]; then
     PLISTBUDDY=$(command -v PlistBuddy || true)
-fi
-if [[ -z "$PLISTBUDDY" ]]; then
-    echo "Error: PlistBuddy can not be found, please install the iOS SDK tools package."
-    exit 1
 fi
 
 mkdir -p "$2"
